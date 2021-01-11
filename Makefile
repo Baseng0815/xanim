@@ -1,3 +1,2 @@
-xanim: main.c
-	gcc main.c -std=c99 -lSDL2 -lX11 -o xanim
-	rm main.o
+xanim: main.cpp
+	g++ main.cpp -ggdb -lSDL2 -lSDL2_image -lX11 -lopencv_core -lopencv_videoio -lopencv_imgproc -o xanim
