@@ -56,7 +56,7 @@ int main(int argc, char **argv)
     options[2].long_name = "file";
     options[2].short_name = 'f';
     options[2].flags = GOPT_ARGUMENT_REQUIRED;
-    // video file as last
+    // gopt needs a GOPT_LAST option
     options[3].flags = GOPT_LAST;
 
     argc = gopt(argv, options);
@@ -258,14 +258,14 @@ void cleanup(RenderContext *rc)
 void printHelp()
 {
     printf("\
-           %s\n\
-           Usage: %s [OPTION]... [FILE]\n\
-           ABOUT\n\
-           This program was written by %s\n\
-           and is licensed under the GPLv2.0\n\
-           You can find the source here: https://github.com/Baseng0815/xanim\n\
-           OPTIONS\n\
-           -v, --version       show version information\n\
-           -h, --help          view this help message\n",
+        %s\n\
+        Usage: %s [OPTION]... [FILE]\n\
+ABOUT\n\
+        This program was written by %s\n\
+        and is licensed under the GPLv2.0\n\
+        You can find the source here: https://github.com/Baseng0815/xanim\n\
+OPTIONS\n\
+        -v, --version       show version information\n\
+        -h, --help          view this help message\n",
            VERSION, PROGRAM_LOCATION, AUTHOR);
 }
