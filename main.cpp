@@ -1,50 +1,109 @@
+// root window
 #include <X11/Xlib.h>
 
+// rendering
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
+// video fram extraction
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
 
-#include <iostream>
 #include <vector>
+#include <string>
+#include <iostream>
+#include <stdio.h>
 
-#define MAX_FRAMES 1024
+// lightweight options parsing
+#include "gopt.h"
+
+const char *VERSION = "xanim version 1.0 (2021-01-12)";
+const char *AUTHOR = "Bastian Engel <bastian.engel00@gmail.com>";
+const char *PROGRAM_LOCATION;
 
 struct RenderContext {
     Display*        dpy; // X11 display
     Window          rootw; // X11 root window
     SDL_Window*     sdlw; // SDL window
     SDL_Renderer*   sdlr; // SDL renderer
-    int sdlw_width, sdlw_height; // SDL window dimensions
+    int sdlwWidth, sdlwHeight; // SDL window dimensions
 };
 
+struct Video {
+    std::vector<SDL_Texture*> sdlTextures; // SDL Textures
+    int framerate; // Framerate in seconds
+};
 
 RenderContext setup();
-std::vector<SDL_Texture*> loadTextures(const RenderContext&);
+Video loadVideo(const RenderContext&, const std::string&);
 void cleanup(RenderContext*);
+void printHelp();
 
-int main()
+int main(int argc, char **argv)
 {
-    RenderContext rc = setup();
-    std::vector<SDL_Texture*> textures = loadTextures(rc);
+    PROGRAM_LOCATION = argv[0];
 
-    for (;;) {
+    struct option options[4];
+    // help
+    options[0].long_name = "help";
+    options[0].short_name = 'h';
+    options[0].flags = GOPT_ARGUMENT_FORBIDDEN;
+    // version
+    options[1].long_name = "version";
+    options[1].short_name = 'v';
+    options[1].flags = GOPT_ARGUMENT_FORBIDDEN;
+    // video file as argument
+    options[2].long_name = "file";
+    options[2].short_name = 'f';
+    options[2].flags = GOPT_ARGUMENT_REQUIRED;
+    // video file as last
+    options[3].flags = GOPT_LAST;
+
+    argc = gopt(argv, options);
+    gopt_errors(argv[0], options);
+
+    if (options[0].count) {
+        printHelp();
+        exit(EXIT_SUCCESS);
+    }
+
+    if (options[1].count) {
+        std::cout << VERSION << "\n";
+        exit(EXIT_SUCCESS);
+    }
+
+    std::string file;
+    if (options[2].count) {
+        file = file.assign(options[2].argument);
+    } else if (argc > 1) {
+        file = file.assign(argv[1]);
+    } else {
+        std::cerr << "no video file specified\n";
+        exit(EXIT_FAILURE);
+    }
+
+    // real functionality starts here
+    RenderContext rc = setup();
+    Video video = loadVideo(rc, file);
+    int delay = 1000 / video.framerate;
+
+    for (bool running = true; running;) {
         // actual rendering
-        for (size_t img = 0; img < textures.size(); img++) {
+        for (size_t img = 0; img < video.sdlTextures.size(); img++) {
             SDL_Rect dstArea { 0, 0, 1920, 1080 };
-            SDL_RenderCopy(rc.sdlr, textures[img], NULL, &dstArea);
+            SDL_RenderCopy(rc.sdlr, video.sdlTextures[img], NULL, &dstArea);
             SDL_RenderPresent(rc.sdlr);
 
-            SDL_Delay(10);
-        }
+            SDL_Delay(delay);
 
-        // only need to check for quit event as rendering is done permanently
-        // (hopefully this doesn't blow the CPU!)
-        SDL_Event event;
-        SDL_PollEvent(&event);
-        if (event.type == SDL_QUIT) {
-            break;
+            // only need to check for quit event as rendering is done permanently
+            // (hopefully this doesn't blow the CPU!)
+            SDL_Event event;
+            SDL_PollEvent(&event);
+            if (event.type == SDL_QUIT) {
+                running = false;
+                break;
+            }
         }
     }
 
@@ -62,51 +121,53 @@ RenderContext setup()
     rc.dpy = XOpenDisplay(NULL);
     if (rc.dpy == NULL) {
         std::cerr << "failed to open X11 display\n";
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     rc.rootw = DefaultRootWindow(rc.dpy);
     std::cout << "root window grabbed\n";
 
     // create SDL renderer
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        std::cerr << "failed to initialize SDL with SDL_INIT_VIDEO: " << SDL_GetError();
-        exit(1);
+        std::cerr << "failed to initialize SDL with SDL_INIT_VIDEO: " << SDL_GetError() << "\n";
+        exit(EXIT_FAILURE);
     }
 
     if ((rc.sdlw = SDL_CreateWindowFrom((void*)rc.rootw)) == NULL) {
-        std::cerr << "failed to create SDL window from root window: " << SDL_GetError();
-        exit(1);
+        std::cerr << "failed to create SDL window from root window: " << SDL_GetError() << "\n";
+        exit(EXIT_FAILURE);
     }
 
     if ((rc.sdlr = SDL_CreateRenderer(rc.sdlw, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)) == NULL) {
-        std::cerr << "failed to create SDL renderer from SDL window: " << SDL_GetError();
-        exit(1);
+        std::cerr << "failed to create SDL renderer from SDL window: " << SDL_GetError() << "\n";
+        exit(EXIT_FAILURE);
     }
 
     // width and height
-    SDL_GetWindowSize(rc.sdlw, &rc.sdlw_width, &rc.sdlw_height);
+    SDL_GetWindowSize(rc.sdlw, &rc.sdlwWidth, &rc.sdlwHeight);
     std::cout << "SDL window and renderer successfully initialized; got dimensions of "
-        << rc.sdlw_width << "x" << rc.sdlw_height << "\n";
+        << rc.sdlwWidth << "x" << rc.sdlwHeight << "\n";
 
     int img_flags = IMG_INIT_PNG;
     if (!(IMG_Init(img_flags) & img_flags)) {
-        std::cerr << "failed to initialize SDL_image: " << IMG_GetError();
-        exit(1);
+        std::cerr << "failed to initialize SDL_image: " << IMG_GetError() << "\n";
+        exit(EXIT_FAILURE);
     }
 
     return rc;
 }
 
-std::vector<SDL_Texture*> loadTextures(const RenderContext &rc)
+Video loadVideo(const RenderContext &rc, const std::string &file)
 {
-    std::vector<SDL_Texture*> textures;
+    Video video;
 
     // open video
-    cv::VideoCapture vc("small.mp4");
+    cv::VideoCapture vc(file);
     if (!vc.isOpened()) {
-        std::cerr << "failed to open video\n";
-        exit(1);
+        std::cerr << "failed to open video file " << file << "; make sure it exists and is valid\n";
+        exit(EXIT_FAILURE);
     }
+
+    std::cout << "loading video file " << file << "...\n";
 
     // get some properties
     cv::Mat firstFrame;
@@ -118,20 +179,20 @@ std::vector<SDL_Texture*> loadTextures(const RenderContext &rc)
     unsigned int width = vc.get(cv::CAP_PROP_FRAME_WIDTH);
     unsigned int height = vc.get(cv::CAP_PROP_FRAME_HEIGHT);
     std::cout << "image dimensions " << width << "x" << height << ", channels " << channels << "\n";
-    if (width != rc.sdlw_width || height != rc.sdlw_height) {
+    if (width != rc.sdlwWidth || height != rc.sdlwHeight) {
         std::cout << "image dimensions and window dimensions differ; frames will be rendered accordingly\n";
     }
+    video.framerate = vc.get(cv::CAP_PROP_FPS);
 
     uint8_t *pixelData = new uint8_t[width * height * 3];
-    std::cout << width * height * 3 << "\n";
     size_t frameCount = vc.get(cv::CAP_PROP_FRAME_COUNT);
 
     // get textures
+    cv::Mat frame;
     for (size_t frameIndex = 0; frameIndex < frameCount; frameIndex++) {
         // get opencv frame
         int pct = (frameIndex + 1) / (float)frameCount * 100;
-        std::cout << "decoding frame " << frameIndex << "... (" << pct << "%)\n";
-        cv::Mat frame;
+        std::cout << "parsing frame " << frameIndex << "... (" << pct << "%)\n";
         vc >> frame;
 
         // opencv mat format may differ, but we need a common pixel format to shove into
@@ -154,21 +215,35 @@ std::vector<SDL_Texture*> loadTextures(const RenderContext &rc)
         SDL_Surface *surface = SDL_CreateRGBSurfaceFrom((void*)pixelData, width,
                                                         height, 24, width * 3, 0x0000ff, 0x00ff00, 0xff0000, 0);
 
-        textures.push_back(SDL_CreateTextureFromSurface(rc.sdlr, surface));
-        SDL_SaveBMP(surface, "out.bmp");
-        SDL_FreeSurface(surface);
+        if (surface) {
+            // for some reason textures are stored in RAM instead of VRAM so large videos
+            // may cause problems, TODO fix or add warning
+            SDL_Texture *texture = SDL_CreateTextureFromSurface(rc.sdlr, surface);
+            if (texture) {
+                video.sdlTextures.push_back(texture);
+            } else {
+                std::cerr << "Texture of frame " << frameIndex << " could not be created\n";
+            }
+            SDL_FreeSurface(surface);
+        } else {
+            std::cerr << "Surface of frame " << frameIndex << " could not be created\n";
+        }
+
+        SDL_Rect dstArea { 0, 0, 1920, 1080 };
+        SDL_RenderCopy(rc.sdlr, video.sdlTextures.back(), NULL, &dstArea);
+        SDL_RenderPresent(rc.sdlr);
     }
 
     delete[] pixelData;
 
-    if (textures.size() <= 0) {
+    if (video.sdlTextures.size() <= 0) {
         std::cerr << "no textures were loaded\n";
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    std::cout << textures.size() << " textures were created\n";
+    std::cout << video.sdlTextures.size() << " textures were created\n";
 
-    return textures;
+    return video;
 }
 
 void cleanup(RenderContext *rc)
@@ -178,4 +253,19 @@ void cleanup(RenderContext *rc)
     SDL_Quit();
     SDL_DestroyWindow(rc->sdlw);
     SDL_DestroyRenderer(rc->sdlr);
+}
+
+void printHelp()
+{
+    printf("\
+           %s\n\
+           Usage: %s [OPTION]... [FILE]\n\
+           ABOUT\n\
+           This program was written by %s\n\
+           and is licensed under the GPLv2.0\n\
+           You can find the source here: https://github.com/Baseng0815/xanim\n\
+           OPTIONS\n\
+           -v, --version       show version information\n\
+           -h, --help          view this help message\n",
+           VERSION, PROGRAM_LOCATION, AUTHOR);
 }
