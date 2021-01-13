@@ -17,7 +17,7 @@
 // lightweight options parsing
 #include "gopt.h"
 
-const char *VERSION = "xanim version 1.0 (2021-01-12)";
+const char *VERSION = "xanim version 1.1 (2021-01-13)";
 const char *AUTHOR = "Bastian Engel <bastian.engel00@gmail.com>";
 const char *PROGRAM_LOCATION;
 
