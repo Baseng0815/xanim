@@ -27,6 +27,8 @@ struct RenderContext {
     SDL_Window*     sdlw; // SDL window
     SDL_Renderer*   sdlr; // SDL renderer
     int sdlwWidth, sdlwHeight; // SDL window dimensions
+
+    std::vector<SDL_Rect> monitors;
 };
 
 struct Video {
@@ -34,6 +36,21 @@ struct Video {
     int framerate; // Framerate in seconds
 };
 
+enum class DrawType {
+    MONITOR, // video is played given monitor
+    AREA, // video is played on given area
+    STRETCH, // video is played over all monitors
+    EACH // video is played on each monitor
+};
+
+struct Options {
+    DrawType drawType = DrawType::MONITOR;
+    int monitorIndex = 0;
+    SDL_Rect targetArea;
+    std::string videoFile;
+};
+
+Options parseOptions(int argc, char **argv);
 RenderContext setup();
 Video loadVideo(const RenderContext&, const std::string&);
 void cleanup(RenderContext*);
@@ -41,57 +58,40 @@ void printHelp();
 
 int main(int argc, char **argv)
 {
-    PROGRAM_LOCATION = argv[0];
-
-    struct option options[4];
-    // help
-    options[0].long_name = "help";
-    options[0].short_name = 'h';
-    options[0].flags = GOPT_ARGUMENT_FORBIDDEN;
-    // version
-    options[1].long_name = "version";
-    options[1].short_name = 'v';
-    options[1].flags = GOPT_ARGUMENT_FORBIDDEN;
-    // video file as argument
-    options[2].long_name = "file";
-    options[2].short_name = 'f';
-    options[2].flags = GOPT_ARGUMENT_REQUIRED;
-    // gopt needs a GOPT_LAST option
-    options[3].flags = GOPT_LAST;
-
-    argc = gopt(argv, options);
-    gopt_errors(argv[0], options);
-
-    if (options[0].count) {
-        printHelp();
-        exit(EXIT_SUCCESS);
-    }
-
-    if (options[1].count) {
-        std::cout << VERSION << "\n";
-        exit(EXIT_SUCCESS);
-    }
-
-    std::string file;
-    if (options[2].count) {
-        file = file.assign(options[2].argument);
-    } else if (argc > 1) {
-        file = file.assign(argv[1]);
-    } else {
-        std::cerr << "no video file specified\n";
-        exit(EXIT_FAILURE);
-    }
-
-    // real functionality starts here
+    Options options = parseOptions(argc, argv);
     RenderContext rc = setup();
-    Video video = loadVideo(rc, file);
+    Video video = loadVideo(rc, options.videoFile);
+
+    if (options.drawType == DrawType::MONITOR && !(options.monitorIndex >= 0 && options.monitorIndex < rc.monitors.size())) {
+        std::cerr << "monitor index not in range. max allowed: " << rc.monitors.size() - 1 << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+
     int delay = 1000 / video.framerate;
 
     for (bool running = true; running;) {
         // actual rendering
         for (size_t img = 0; img < video.sdlTextures.size(); img++) {
-            SDL_Rect dstArea { 0, 0, 1920, 1080 };
-            SDL_RenderCopy(rc.sdlr, video.sdlTextures[img], NULL, &dstArea);
+            SDL_RenderClear(rc.sdlr);
+            switch (options.drawType) {
+                case DrawType::MONITOR:
+                    SDL_RenderCopy(rc.sdlr, video.sdlTextures[img], NULL, &rc.monitors[options.monitorIndex]);
+                    break;
+
+                case DrawType::AREA:
+                    SDL_RenderCopy(rc.sdlr, video.sdlTextures[img], NULL, &options.targetArea);
+                    break;
+
+                case DrawType::STRETCH:
+                    SDL_RenderCopy(rc.sdlr, video.sdlTextures[img], NULL, NULL);
+                    break;
+
+                case DrawType::EACH:
+                    for (const SDL_Rect &rect : rc.monitors) {
+                        SDL_RenderCopy(rc.sdlr, video.sdlTextures[img], NULL, &rect);
+                    }
+
+            }
             SDL_RenderPresent(rc.sdlr);
 
             SDL_Delay(delay);
@@ -110,7 +110,96 @@ int main(int argc, char **argv)
     // cleanup
     cleanup(&rc);
 
-    return 0;
+    return EXIT_SUCCESS;
+}
+
+Options parseOptions(int argc, char **argv)
+{
+    Options ops;
+
+    PROGRAM_LOCATION = argv[0];
+
+    option options[8];
+    // help
+    options[0].long_name = "help";
+    options[0].short_name = 'h';
+    options[0].flags = GOPT_ARGUMENT_FORBIDDEN;
+    // version
+    options[1].long_name = "version";
+    options[1].short_name = 'v';
+    options[1].flags = GOPT_ARGUMENT_FORBIDDEN;
+
+    // monitor
+    options[2].long_name = "monitor";
+    options[2].short_name = 'm';
+    options[2].flags = GOPT_ARGUMENT_REQUIRED;
+    // area
+    options[3].long_name = "area";
+    options[3].short_name = 'a';
+    options[3].flags = GOPT_ARGUMENT_REQUIRED;
+    // stretch
+    options[4].long_name = "stretch";
+    options[4].short_name = 's';
+    options[4].flags = GOPT_ARGUMENT_FORBIDDEN;
+    // each
+    options[5].long_name = "each";
+    options[5].short_name = 'e';
+    options[5].flags = GOPT_ARGUMENT_FORBIDDEN;
+
+    // video file as argument
+    options[6].long_name = "file";
+    options[6].short_name = 'f';
+    options[6].flags = GOPT_ARGUMENT_REQUIRED;
+
+    // gopt needs a GOPT_LAST option
+    options[7].flags = GOPT_LAST;
+
+    argc = gopt(argv, options);
+    gopt_errors(argv[0], options);
+
+    // help
+    if (options[0].count) {
+        printHelp();
+        std::exit(EXIT_SUCCESS);
+    }
+
+    // version
+    if (options[1].count) {
+        std::cout << VERSION << "\n";
+        std::exit(EXIT_SUCCESS);
+    }
+
+    // monitor
+    if (options[2].count) {
+        ops.monitorIndex = atoi(options[2].argument);
+        std::cout << "drawing on monitor of index " << ops.monitorIndex << "\n";
+    // area
+    } else if (options[3].count) {
+        ops.drawType = DrawType::AREA;
+        sscanf(options[2].argument, "%ix%i+%i+%i", &ops.targetArea.w, &ops.targetArea.h, &ops.targetArea.x, &ops.targetArea.y);
+        printf("widthxheight+x+y %ix%i+%i+%i\n",ops.targetArea.w, ops.targetArea.h, ops.targetArea.x, ops.targetArea.y);
+        std::cout << "drawing on area\n";
+    // stretch
+    } else if (options[4].count) {
+        ops.drawType = DrawType::STRETCH;
+        std::cout << "drawing stretched over all monitors\n";
+    // each
+    } else if (options[5].count) {
+        ops.drawType = DrawType::EACH;
+        std::cout << "drawing on each monitor\n";
+    }
+
+    // video file
+    if (options[6].count) {
+        ops.videoFile = options[6].argument;
+    } else if (argc > 1) {
+        ops.videoFile = argv[1];
+    } else {
+        std::cerr << "no video file specified\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    return ops;
 }
 
 RenderContext setup()
@@ -121,7 +210,7 @@ RenderContext setup()
     rc.dpy = XOpenDisplay(NULL);
     if (rc.dpy == NULL) {
         std::cerr << "failed to open X11 display\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
     rc.rootw = DefaultRootWindow(rc.dpy);
     std::cout << "root window grabbed\n";
@@ -129,28 +218,36 @@ RenderContext setup()
     // create SDL renderer
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << "failed to initialize SDL with SDL_INIT_VIDEO: " << SDL_GetError() << "\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 
     if ((rc.sdlw = SDL_CreateWindowFrom((void*)rc.rootw)) == NULL) {
         std::cerr << "failed to create SDL window from root window: " << SDL_GetError() << "\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 
     if ((rc.sdlr = SDL_CreateRenderer(rc.sdlw, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)) == NULL) {
         std::cerr << "failed to create SDL renderer from SDL window: " << SDL_GetError() << "\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 
-    // width and height
+    // width and height of X11 root
     SDL_GetWindowSize(rc.sdlw, &rc.sdlwWidth, &rc.sdlwHeight);
     std::cout << "SDL window and renderer successfully initialized; got dimensions of "
         << rc.sdlwWidth << "x" << rc.sdlwHeight << "\n";
 
+    // width and height of each individual monitor
+    for (int i = 0; i < SDL_GetNumVideoDisplays(); i++) {
+        SDL_Rect rect;
+        SDL_GetDisplayBounds(i, &rect);
+        rc.monitors.emplace_back(rect);
+        printf("monitor %i dimensions: %ix%i+%i+%i\n", i, rect.w, rect.h, rect.x, rect.y);
+    }
+
     int img_flags = IMG_INIT_PNG;
     if (!(IMG_Init(img_flags) & img_flags)) {
         std::cerr << "failed to initialize SDL_image: " << IMG_GetError() << "\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 
     return rc;
@@ -164,7 +261,7 @@ Video loadVideo(const RenderContext &rc, const std::string &file)
     cv::VideoCapture vc(file);
     if (!vc.isOpened()) {
         std::cerr << "failed to open video file " << file << "; make sure it exists and is valid\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 
     std::cout << "loading video file " << file << "...\n";
@@ -238,7 +335,7 @@ Video loadVideo(const RenderContext &rc, const std::string &file)
 
     if (video.sdlTextures.size() <= 0) {
         std::cerr << "no textures were loaded\n";
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
 
     std::cout << video.sdlTextures.size() << " textures were created\n";
@@ -266,6 +363,11 @@ ABOUT\n\
         You can find the source here: https://github.com/Baseng0815/xanim\n\
 OPTIONS\n\
         -v, --version       show version information\n\
-        -h, --help          view this help message\n",
+        -h, --help          view this help message\n\
+        -m, --monitor       draw on a specific monitor\n\
+        -a, --area          specify area (wxh+x+y)\n\
+        -s, --stretch       stretch over all monitors\n\
+        -e, --each          draw on each monitor\n\
+        -f, --help          view this help message\n",
            VERSION, PROGRAM_LOCATION, AUTHOR);
 }

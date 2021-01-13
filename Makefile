@@ -1,11 +1,25 @@
-xanim: main.o gopt.o gopt-errors.o
-	g++ -o xanim main.o gopt.o gopt-errors.o -lSDL2 -lSDL2_image -lX11 -lopencv_core -lopencv_videoio -lopencv_imgproc
+LDFLAGS = -lSDL2 -lSDL2_image -lX11 -lopencv_core -lopencv_videoio -lopencv_imgproc
+CC = g++ -std=c++14
+BIN = xanim
 
+$(BIN): main.o gopt.o gopt-errors.o
+	$(CC) -o $(BIN) main.o gopt.o gopt-errors.o $(LDFLAGS)
 main.o: main.cpp
-	g++ -c main.cpp -ggdb
+	$(CC) -c main.cpp -ggdb
 
 gopt.o: gopt.c gopt.h
-	gcc -c gopt.c
+	$(CC) -c gopt.c
 
 gopt-errors.o: gopt-errors.c gopt.h
-	gcc -c gopt-errors.c
+	$(CC) -c gopt-errors.c
+
+install: $(BIN)
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp -f $(BIN) $(DESTDIR)$(PREFIX)/bin
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/$(BIN)
+
+uninstall:
+	rm $(DESTDIR)$(PREFIX)/bin/$(BIN)
+
+clean:
+	rm -f $(BIN) *.o
