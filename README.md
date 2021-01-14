@@ -12,8 +12,8 @@ Although performance is not a problem, I have experienced issues when trying to
 display large videos. **For some reason, SDL_Textures are not consistently put
 into VRAM, so large videos might be put in your RAM and exhaust it**.
 
-Another problem is composite managers like xcompton, picom or xcompmgr, who
-draw to an off-screen buffer and then display the full frame with all windows
+Another problem might arise when using composite managers like xcompton, picom or xcompmgr,
+who draw to an off-screen buffer and then display the full frame with all windows
 on the root window. **This causes problems and glitches so I discourage the
 use of a composite manager**. If you manage to find the root for this problem,
 please create a pull request or send it to me and I will gladly fix it.
