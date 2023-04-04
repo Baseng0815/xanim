@@ -3,7 +3,7 @@
 xanim is an animated wallpaper engine for X11 using Xlib, OpenCV and SDL which
 uses low system resources (<1% CPU on my six-core machine). It works by
 extracting frames from a video and pumping them into the X11 root window
-via an SDL_Renderer (inspirated by [glouw/paperview](https://github.com/glouw/paperview).
+via an SDL_Renderer (inspirated by [glouw/paperview](https://github.com/glouw/paperview)).
 Frames are extracted using OpenCV so the supported formats depend on its support, but
 the most common formats should work.
 
